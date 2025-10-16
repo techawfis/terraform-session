@@ -4,12 +4,6 @@ variable "aws_region" {
   default     = "ap-south-1"
 }
 
-variable "aws_profile" {
-  description = "AWS CLI profile to use"
-  type        = string
-  default     = "default"
-}
-
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
   type        = string
