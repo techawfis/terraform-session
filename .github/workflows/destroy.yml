@@ -1,0 +1,88 @@
+name: Terraform VPC Destroy
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - stage
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment to deploy (dev, stage, main)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - stage
+          - main
+
+permissions:
+  id-token: write      # Required for OIDC
+  contents: read       # Required to read repo contents
+
+jobs:
+  terraform:
+    name: Terraform Deploy
+    runs-on: ubuntu-latest
+
+    env:
+      TF_LOG: INFO
+      # AWS_REGION: ${{ secrets.AWS_REGION }}
+      # ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # - name: Configure AWS Credentials (OIDC)
+      #   uses: aws-actions/configure-aws-credentials@v5
+      #   with:
+      #     role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+      #     aws-region: ${{ env.AWS_REGION }}
+      #     role-session-name: github-actions-terraform
+      #     audience: sts.amazonaws.com
+
+      # - name: Configure AWS credentials
+      #   uses: aws-actions/configure-aws-credentials@v2
+      #   with:
+      #     role-to-assume: arn:aws:iam::212603385062:role/GitHubOIDCRole
+      #     aws-region: ap-south-1
+      #     role-session-name: github-actions-terraform
+      #     audience: sts.amazonaws.com
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan Destroy
+        run: terraform plan -destroy
+
+      - name: Terraform Destroy Confirmation
+        run: |
+          echo "WARNING: You are about to destroy the '${{ env.ENVIRONMENT }}' environment!"
+          echo "Sleeping for 10 seconds to allow cancellation..."
+          sleep 10
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve
