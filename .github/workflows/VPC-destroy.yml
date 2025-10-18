@@ -1,0 +1,80 @@
+name: VPC Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment to destroy (dev, stage, main)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - stage
+          - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform-destroy:
+    name: Destroy Terraform Environment
+    runs-on: ubuntu-latest
+
+    env:
+      TF_LOG: INFO
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      AWS_S3_BUCKET: ${{ secrets.AWS_BUCKET_NAME }}
+      DYNAMODB_TABLE: ${{ secrets.DYNAMODB_TABLE }}
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform-destroy
+          audience: sts.amazonaws.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Verify backend S3 state file
+        run: |
+          echo "Checking S3 backend file:"
+          aws s3 ls s3://$AWS_S3_BUCKET/aws-vpc/${ENVIRONMENT}/terraform.tfstate || echo "⚠️ State file not found in S3"
+
+      - name: Terraform Init (Reconfigure Backend)
+        run: |
+          echo "Using S3 bucket: ${{ env.AWS_S3_BUCKET }}"
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.AWS_S3_BUCKET }}" \
+            -backend-config="key=aws-vpc/${{ env.ENVIRONMENT }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.DYNAMODB_TABLE }}" \
+            -backend-config="encrypt=true"
+
+      - name: Debug Terraform Workspace & Backend
+        run: |
+          terraform workspace show || true
+          terraform providers
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Destroy Confirmation
+        run: |
+          echo "⚠️ WARNING: You are about to destroy the '${{ env.ENVIRONMENT }}' environment!"
+          echo "Sleeping for 10 seconds to allow cancellation..."
+          sleep 10
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -input=false -var-file="environments/${{ env.ENVIRONMENT }}/terraform.tfvars"

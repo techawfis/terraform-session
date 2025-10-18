@@ -1,0 +1,72 @@
+name: VPC Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment (dev/prod/etc)'
+        required: true
+        default: 'dev'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_S3_BUCKET: ${{ secrets.AWS_BUCKET_NAME }}
+  DYNAMODB_TABLE: ${{ secrets.DYNAMODB_TABLE }}
+
+jobs:
+  terraform:
+    name: Terraform VPC
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubOIDCSession
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Verify Backend S3 State File
+        run: |
+          echo "Checking S3 backend file:"
+          aws s3 ls s3://${{ env.AWS_S3_BUCKET }}/aws-vpc/${{ github.event.inputs.environment }}/terraform.tfstate || echo "⚠️ State file not found in S3"
+
+      - name: Terraform Init (Reconfigure Backend)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ env.AWS_S3_BUCKET }}" \
+            -backend-config="key=aws-vpc/${{ github.event.inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.DYNAMODB_TABLE }}" \
+            -backend-config="encrypt=true"
+
+      - name: Debug Terraform Workspace & Backend
+        run: |
+          terraform workspace show || true
+          terraform providers
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -input=false \
+            -var-file="environments/${{ github.event.inputs.environment }}/terraform.tfvars" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: github.event_name == 'workflow_dispatch'
+        run: terraform apply -input=false -auto-approve tfplan
