@@ -1,5 +1,10 @@
 terraform {
-  backend "s3" {}
+  backend "s3" {
+    bucket         = "github-actions-oidc-s3-bucket"
+    key            = "env:/terraform.tfstate"
+    region         = "ap-south-1"
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
