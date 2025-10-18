@@ -1,9 +1,5 @@
 terraform {
-  backend "s3" {
-    bucket         = "github-actions-oidc-s3-bucket"
-    key            = "env:/terraform.tfstate"
-    region         = "ap-south-1"
-  }
+  backend "s3" { }
 
   required_providers {
     aws = {
